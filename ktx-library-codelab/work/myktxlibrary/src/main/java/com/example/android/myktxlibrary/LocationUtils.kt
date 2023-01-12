@@ -16,8 +16,18 @@
 
 package com.example.android.myktxlibrary
 
+import android.annotation.SuppressLint
 import android.location.Location
+import android.os.Looper
+import android.util.Log
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resumeWithException
 
 fun createLocationRequest() = LocationRequest.create().apply {
     interval = 3000
@@ -28,5 +38,36 @@ fun createLocationRequest() = LocationRequest.create().apply {
 fun Location.asString(format: Int = Location.FORMAT_DEGREES): String {
     val latitude = Location.convert(latitude, format)
     val longitude = Location.convert(longitude, format)
-    return TODO()
+    return "$latitude $longitude"
+}
+
+@SuppressLint("MissingPermission")
+suspend fun FusedLocationProviderClient.awaitLastLocation():Location? =
+    suspendCancellableCoroutine<Location>() { continuation ->
+        lastLocation.addOnSuccessListener { location ->
+            continuation.resume(location, null)
+        }.addOnFailureListener { e ->
+            continuation.resumeWithException(e)
+        }
+    }
+
+@SuppressLint("MissingPermission")
+fun FusedLocationProviderClient.locationFlow() = callbackFlow<Location> {
+    val locationCallback: LocationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult?) {
+            if (locationResult != null) {
+                offer(locationResult.lastLocation)
+            }
+        }
+    }
+    requestLocationUpdates(
+        createLocationRequest(),
+        locationCallback,
+        Looper.getMainLooper()
+    ).addOnFailureListener { e ->
+        close(e)
+    }
+    awaitClose {
+        removeLocationUpdates(locationCallback)
+    }
 }

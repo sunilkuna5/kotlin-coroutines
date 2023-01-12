@@ -16,30 +16,26 @@
 
 package com.example.android.kotlinktxworkshop
 
+import android.Manifest
+import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Looper
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
-import com.example.android.myktxlibrary.createLocationRequest
-import com.example.android.myktxlibrary.findAndSetText
-import com.example.android.myktxlibrary.showLocation
+import androidx.lifecycle.asLiveData
+import androidx.lifecycle.lifecycleScope
+import com.example.android.myktxlibrary.*
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.conflate
 
 class MainActivity : AppCompatActivity() {
 
-    private var listeningToUpdates = false
-
-    private val locationCallback: LocationCallback = object : LocationCallback() {
-        override fun onLocationResult(locationResult: LocationResult?) {
-            if (locationResult != null) {
-                showLocation(R.id.textView, locationResult.lastLocation)
-            }
-        }
-    }
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
@@ -47,52 +43,42 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        startUpdatingLocation()
     }
 
     override fun onStart() {
         super.onStart()
 
-//        val permissionApproved =
-//            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-//        if (!permissionApproved) {
-//            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 0)
-//        }
+        if (!hasPermission(ACCESS_FINE_LOCATION)) {
+            requestPermissions(arrayOf(ACCESS_FINE_LOCATION), 0)
+        }
 
-        getLastKnownLocation()
-        startUpdatingLocation()
-    }
-
-    private fun getLastKnownLocation() {
-        fusedLocationClient.lastLocation
-            .addOnSuccessListener { lastLocation ->
-                showLocation(R.id.textView, lastLocation)
-            }.addOnFailureListener { e ->
-                findAndSetText(R.id.textView, "Unable to get location.")
-                Log.d(TAG, "Unable to get location", e)
-            }
-    }
-
-    private fun startUpdatingLocation() {
-        fusedLocationClient.requestLocationUpdates(
-            createLocationRequest(),
-            locationCallback,
-            Looper.getMainLooper()
-        ).addOnSuccessListener { listeningToUpdates = true }
-            .addOnFailureListener { e ->
-                findAndSetText(R.id.textView, "Unable to get location.")
-                Log.d(TAG, "Unable to get location", e)
-            }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (listeningToUpdates) {
-            stopUpdatingLocation()
+        lifecycleScope.launchWhenStarted {
+            getLastKnownLocation()
         }
     }
 
-    private fun stopUpdatingLocation() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+    private suspend fun getLastKnownLocation() {
+        try {
+            val lastLocation = fusedLocationClient.awaitLastLocation();
+            showLocation(R.id.textView, lastLocation)
+        } catch (e:Exception) {
+            findAndSetText(R.id.textView, "Unable to get location.")
+            Log.d(TAG, "Unable to get location", e)
+        }
+    }
+
+    private fun startUpdatingLocation() {
+        fusedLocationClient.locationFlow()
+            .conflate()
+            .catch { e ->
+                findAndSetText(R.id.textView, "Unable to get location.")
+                Log.d(TAG, "Unable to get location", e)
+            }.asLiveData()
+            .observe(this) { location ->
+                showLocation(R.id.textView, location)
+                Log.d(TAG, location.toString())
+            }
     }
 
     override fun onRequestPermissionsResult(
